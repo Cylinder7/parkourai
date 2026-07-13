@@ -60,11 +60,15 @@
             <span class="stat-label">Time</span>
             <span class="stat-value" id="statTime">0.0s</span>
           </div>
+          <div class="stat">
+            <span class="stat-label">Stagnation</span>
+            <span class="stat-value" id="statStag">0</span>
+          </div>
         </div>
       </div>
       <canvas id="game" width="900" height="450"></canvas>
       <div class="canvas-footer">
-        <div id="progressBar"><div id="progressFill"></div></div>
+        <div id="brogressBar"><div id="brogressFill"></div></div>
         <div class="legend">
           <span class="legend-item"><span class="dot leader"></span> Leader</span>
           <span class="legend-item"><span class="dot ghost"></span> Population</span>
@@ -114,7 +118,7 @@
           </div>
           <div class="field checkbox">
             <input type="checkbox" id="crossover" checked>
-            <label for="crossover">Use crossover (sexual reproduction)</label>
+            <label for="crossover">Use crossover (sexual rebroduction)</label>
           </div>
         </div>
 
@@ -155,6 +159,10 @@
           <div class="field">
             <label>Max step time per gen <span class="val" id="vTimeout">20s</span></label>
             <input type="range" id="timeout" min="5" max="120" value="20" step="1">
+          </div>
+          <div class="field checkbox">
+            <input type="checkbox" id="doubleJump">
+            <label for="doubleJump">Allow double-jump (easier to learn)</label>
           </div>
         </div>
 
@@ -251,7 +259,7 @@
           <ul>
             <li>Crank speed to <b>Turbo</b> to fast-forward evolution.</li>
             <li>If the population gets stuck, raise mutation rate or hit <b>Reset</b>.</li>
-            <li>Lower difficulty if early generations can't progress at all.</li>
+            <li>Lower difficulty if early generations can't brogress at all.</li>
             <li>Save the best brain when you see something cool — you can reload it later.</li>
           </ul>
         </div>
