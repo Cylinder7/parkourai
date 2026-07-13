@@ -102,7 +102,7 @@ class NeuralNetwork {
   }
 
   copy() {
-    const nn = Object.create(NeuralNetwork.brototype);
+    const nn = Object.create(NeuralNetwork.prototype);
     nn.sizes = this.sizes.slice();
     nn.weights = [];
     nn.biases = [];
@@ -164,7 +164,7 @@ class NeuralNetwork {
   }
 
   static deserialize(obj) {
-    const nn = Object.create(NeuralNetwork.brototype);
+    const nn = Object.create(NeuralNetwork.prototype);
     nn.sizes = obj.sizes.slice();
     nn.weights = [];
     nn.biases = [];
@@ -285,7 +285,7 @@ class Agent {
     this.timeAlive = 0;
     this.maxX = this.x;
     this.jumps = 0;
-    this.lastBrogressTime = 0;
+    this.lastProgressTime = 0;
     this.fitness = 0;
     this.reachedGoal = false;
     this.coyoteTime = 0;
@@ -409,14 +409,14 @@ class Agent {
       this.alive = false;
     }
 
-    // Track brogress
+    // Track progress
     if (this.x > this.maxX) {
       this.maxX = this.x;
-      this.lastBrogressTime = this.timeAlive;
+      this.lastProgressTime = this.timeAlive;
     }
 
-    // Anti-stuck: if no brogress for 5s, kill (generous to allow exploration)
-    if (this.timeAlive - this.lastBrogressTime > 5) {
+    // Anti-stuck: if no progress for 5s, kill (generous to allow exploration)
+    if (this.timeAlive - this.lastProgressTime > 5) {
       this.alive = false;
     }
 
@@ -443,10 +443,10 @@ class Agent {
     if (dy === 0) {
       // Check if there's ground just below us
       let grounded = false;
-      const brobeY = this.y + this.h + 1;
+      const probeY = this.y + this.h + 1;
       for (const p of this.level.platforms) {
         if (this.x + this.w > p.x && this.x < p.x + p.w &&
-            brobeY >= p.y && brobeY <= p.y + p.h) {
+            probeY >= p.y && probeY <= p.y + p.h) {
           grounded = true; break;
         }
       }
@@ -505,8 +505,8 @@ class Population {
     this.bestEver = null;       // {brain, fitness, generation}
     this.history = [];          // [{gen, best, avg, worst}]
     this.bestFitnessEver = 0;
-    this.lastImbrovementGen = 1;
-    this.stagnation = 0;        // generations since meaningful imbrovement
+    this.lastImprovementGen = 1;
+    this.stagnation = 0;        // generations since meaningful improvement
     this.stagnationBoost = 1;   // mutation rate multiplier when stagnating
     this._spawn();
   }
@@ -571,11 +571,11 @@ class Population {
       };
     }
 
-    // Stagnation detection: did the best fitness imbrove meaningfully?
-    const imbrovementThreshold = Math.max(10, this.bestFitnessEver * 0.03); // 3% or at least 10 units
-    if (best.fitness > this.bestFitnessEver + imbrovementThreshold) {
+    // Stagnation detection: did the best fitness improve meaningfully?
+    const improvementThreshold = Math.max(10, this.bestFitnessEver * 0.03); // 3% or at least 10 units
+    if (best.fitness > this.bestFitnessEver + improvementThreshold) {
       this.bestFitnessEver = best.fitness;
-      this.lastImbrovementGen = this.generation;
+      this.lastImprovementGen = this.generation;
       this.stagnation = 0;
       this.stagnationBoost = 1;
     } else {
@@ -1175,10 +1175,10 @@ function updateStats() {
   const leader = pop.leader();
   $('statLeader').textContent = leader ? Math.round(leader.maxX) : 0;
   $('statTime').textContent = ((performance.now() - genStartTime) / 1000).toFixed(1) + 's';
-  // Brogress bar
+  // Progress bar
   const leaderX = leader ? leader.maxX : 0;
   const pct = clamp(leaderX / level.goalX * 100, 0, 100);
-  $('brogressFill').style.width = pct + '%';
+  $('progressFill').style.width = pct + '%';
   // Stagnation indicator (color shifts to warn as stagnation grows)
   const stagEl = $('statStag');
   if (stagEl) {
