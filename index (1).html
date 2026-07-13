@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NeuroParkour — Watch AI Learn to Beat a Platformer</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- ===== Header ===== -->
+  <header id="topbar">
+    <div class="brand">
+      <div class="logo">NP</div>
+      <div>
+        <h1>NeuroParkour</h1>
+        <p class="tagline">Watch a population of neural networks learn to parkour via neuroevolution</p>
+      </div>
+    </div>
+    <div class="top-controls">
+      <button id="btnPlay" class="btn primary">▶ Start Training</button>
+      <button id="btnSkip" class="btn">⏭ Skip Gen</button>
+      <button id="btnReset" class="btn danger">↻ Reset</button>
+      <div class="speed-presets">
+        <span class="label">Speed:</span>
+        <button data-speed="1" class="chip active">1×</button>
+        <button data-speed="2" class="chip">2×</button>
+        <button data-speed="5" class="chip">5×</button>
+        <button data-speed="10" class="chip">10×</button>
+        <button data-speed="30" class="chip">Turbo</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- ===== Main Layout ===== -->
+  <main id="layout">
+
+    <!-- Canvas Section -->
+    <section class="canvas-wrap">
+      <div class="canvas-header">
+        <div class="live-stats">
+          <div class="stat">
+            <span class="stat-label">Generation</span>
+            <span class="stat-value" id="statGen">1</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">Alive</span>
+            <span class="stat-value" id="statAlive">0</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">Best Distance</span>
+            <span class="stat-value" id="statBest">0</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">Gen Leader</span>
+            <span class="stat-value" id="statLeader">0</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">Time</span>
+            <span class="stat-value" id="statTime">0.0s</span>
+          </div>
+        </div>
+      </div>
+      <canvas id="game" width="900" height="450"></canvas>
+      <div class="canvas-footer">
+        <div id="progressBar"><div id="progressFill"></div></div>
+        <div class="legend">
+          <span class="legend-item"><span class="dot leader"></span> Leader</span>
+          <span class="legend-item"><span class="dot ghost"></span> Population</span>
+          <span class="legend-item"><span class="dot dead"></span> Eliminated</span>
+          <span class="legend-item"><span class="dot goal"></span> Goal</span>
+        </div>
+      </div>
+
+      <!-- Fitness chart -->
+      <div class="chart-wrap">
+        <div class="chart-title">Fitness History (per generation)</div>
+        <canvas id="chart" width="900" height="120"></canvas>
+      </div>
+    </section>
+
+    <!-- Sidebar -->
+    <aside id="sidebar">
+      <div class="tabs">
+        <button class="tab active" data-tab="settings">⚙ Settings</button>
+        <button class="tab" data-tab="brains">🧠 Brains</button>
+        <button class="tab" data-tab="help">? Help</button>
+      </div>
+
+      <!-- Settings Tab -->
+      <div class="tab-pane active" id="tab-settings">
+        <div class="panel-section">
+          <h3>🧬 Evolution</h3>
+          <div class="field">
+            <label>Population size <span class="val" id="vPop">50</span></label>
+            <input type="range" id="popSize" min="5" max="300" value="50" step="1">
+          </div>
+          <div class="field">
+            <label>Mutation rate <span class="val" id="vMutRate">10%</span></label>
+            <input type="range" id="mutRate" min="0" max="100" value="10" step="1">
+          </div>
+          <div class="field">
+            <label>Mutation amount <span class="val" id="vMutAmt">0.50</span></label>
+            <input type="range" id="mutAmt" min="0" max="200" value="50" step="1">
+          </div>
+          <div class="field">
+            <label>Elitism (top carried over) <span class="val" id="vElite">2</span></label>
+            <input type="range" id="elite" min="0" max="20" value="2" step="1">
+          </div>
+          <div class="field">
+            <label>Selection pressure (top % parents) <span class="val" id="vSel">30%</span></label>
+            <input type="range" id="selPct" min="5" max="100" value="30" step="1">
+          </div>
+          <div class="field checkbox">
+            <input type="checkbox" id="crossover" checked>
+            <label for="crossover">Use crossover (sexual reproduction)</label>
+          </div>
+        </div>
+
+        <div class="panel-section">
+          <h3>🧠 Neural Network</h3>
+          <div class="field">
+            <label>Hidden layers (comma-separated sizes)</label>
+            <input type="text" id="hidden" value="8,6" class="text-input">
+          </div>
+          <div class="field">
+            <label>Number of ray sensors <span class="val" id="vRays">5</span></label>
+            <input type="range" id="rayCount" min="3" max="11" value="5" step="2">
+          </div>
+          <div class="field">
+            <label>Sensor range <span class="val" id="vRange">180px</span></label>
+            <input type="range" id="rayRange" min="50" max="500" value="180" step="10">
+          </div>
+          <div class="field checkbox">
+            <input type="checkbox" id="autorun" checked>
+            <label for="autorun">Auto-run (always move right)</label>
+          </div>
+        </div>
+
+        <div class="panel-section">
+          <h3>🏃 Physics</h3>
+          <div class="field">
+            <label>Gravity <span class="val" id="vGrav">0.60</span></label>
+            <input type="range" id="gravity" min="10" max="200" value="60" step="1">
+          </div>
+          <div class="field">
+            <label>Jump force <span class="val" id="vJump">-12.0</span></label>
+            <input type="range" id="jump" min="-200" max="-50" value="-120" step="1">
+          </div>
+          <div class="field">
+            <label>Run speed <span class="val" id="vRun">3.5</span></label>
+            <input type="range" id="runSpeed" min="10" max="100" value="35" step="1">
+          </div>
+          <div class="field">
+            <label>Max step time per gen <span class="val" id="vTimeout">20s</span></label>
+            <input type="range" id="timeout" min="5" max="120" value="20" step="1">
+          </div>
+        </div>
+
+        <div class="panel-section">
+          <h3>🗺️ Level</h3>
+          <div class="field">
+            <label>Level seed</label>
+            <input type="text" id="seed" value="42" class="text-input">
+          </div>
+          <div class="field">
+            <label>Level length <span class="val" id="vLen">6000px</span></label>
+            <input type="range" id="levelLen" min="2000" max="20000" value="6000" step="500">
+          </div>
+          <div class="field">
+            <label>Difficulty <span class="val" id="vDiff">Medium</span></label>
+            <input type="range" id="difficulty" min="0" max="3" value="1" step="1">
+          </div>
+          <button id="btnNewLevel" class="btn small">🎲 Generate New Level</button>
+        </div>
+
+        <div class="panel-section">
+          <h3>🎨 Visualization</h3>
+          <div class="field checkbox">
+            <input type="checkbox" id="showRays" checked>
+            <label for="showRays">Show sensors on leader</label>
+          </div>
+          <div class="field checkbox">
+            <input type="checkbox" id="showAll" checked>
+            <label for="showAll">Show all agents (ghosts)</label>
+          </div>
+          <div class="field checkbox">
+            <input type="checkbox" id="showDead">
+            <label for="showDead">Show dead agents</label>
+          </div>
+          <div class="field checkbox">
+            <input type="checkbox" id="followCam" checked>
+            <label for="followCam">Camera follows leader</label>
+          </div>
+        </div>
+
+        <div class="panel-section">
+          <h3>📦 Import / Export</h3>
+          <button id="btnSave" class="btn small">⬇ Save Best Brain (JSON)</button>
+          <label for="btnLoad" class="btn small">⬆ Load Brain</label>
+          <input type="file" id="btnLoad" accept=".json" style="display:none">
+          <button id="btnExport" class="btn small">⬇ Export Settings</button>
+          <label for="btnImport" class="btn small">⬆ Import Settings</label>
+          <input type="file" id="btnImport" accept=".json" style="display:none">
+        </div>
+      </div>
+
+      <!-- Brains Tab -->
+      <div class="tab-pane" id="tab-brains">
+        <div class="panel-section">
+          <h3>🏆 All-Time Best Brain</h3>
+          <div class="brain-info" id="bestBrainInfo">No best brain yet — train one!</div>
+          <button id="btnUseBest" class="btn small" disabled>Load Best into Population</button>
+        </div>
+        <div class="panel-section">
+          <h3>📊 Population Snapshot</h3>
+          <div id="popSnapshot" class="snapshot-grid"></div>
+        </div>
+        <div class="panel-section">
+          <h3>📜 Generation Log</h3>
+          <div id="genLog" class="gen-log"></div>
+        </div>
+      </div>
+
+      <!-- Help Tab -->
+      <div class="tab-pane" id="tab-help">
+        <div class="panel-section help">
+          <h3>How it works</h3>
+          <p>Each agent is a small neural network that receives sensor readings (rays cast from its body) and decides whether to jump.</p>
+          <p>Every agent in the population plays the same level simultaneously. When they all die (or the timeout hits), the fittest are selected as parents — their networks are copied, crossed over, and mutated to form the next generation.</p>
+          <p>Over many generations, the population evolves strategies for jumping gaps, scaling walls, and chaining parkour moves.</p>
+
+          <h3>Inputs to the brain</h3>
+          <ul>
+            <li>N ray sensors cast from the agent (down, down-right, right, up-right, up...)</li>
+            <li>Current vertical velocity (normalized)</li>
+            <li>Whether the agent is on the ground (0 or 1)</li>
+          </ul>
+
+          <h3>Outputs</h3>
+          <ul>
+            <li>Auto-run ON: 1 output — jump (sigmoid &gt; 0.5)</li>
+            <li>Auto-run OFF: 3 outputs — jump, move-left, move-right</li>
+          </ul>
+
+          <h3>Fitness</h3>
+          <p>Max horizontal distance traveled (with a tiny bonus for time alive, so an agent that survives longer ties above one that died young at the same x).</p>
+
+          <h3>Tips</h3>
+          <ul>
+            <li>Crank speed to <b>Turbo</b> to fast-forward evolution.</li>
+            <li>If the population gets stuck, raise mutation rate or hit <b>Reset</b>.</li>
+            <li>Lower difficulty if early generations can't progress at all.</li>
+            <li>Save the best brain when you see something cool — you can reload it later.</li>
+          </ul>
+        </div>
+      </div>
+    </aside>
+  </main>
+</div>
+
+<script src="script.js"></script>
+</body>
+</html>
