@@ -53,6 +53,8 @@ const settings = {
   seed: 42,
   levelLen: 6000,
   difficulty: 1,
+  // Mechanics
+  doubleJump: false,
   // Viz
   showRays: true,
   showAll: true,
@@ -73,9 +75,9 @@ class NeuralNetwork {
       const B = [];
       for (let o = 0; o < c; o++) {
         const row = new Float32Array(r);
-        for (let k = 0; k < r; k++) row[k] = randn() * 0.8;
+        for (let k = 0; k < r; k++) row[k] = randn() * 1.5;
         W.push(row);
-        B.push(randn() * 0.5);
+        B.push(randn() * 1.0);
       }
       this.weights.push(W);
       this.biases.push(B);
@@ -100,7 +102,7 @@ class NeuralNetwork {
   }
 
   copy() {
-    const nn = Object.create(NeuralNetwork.prototype);
+    const nn = Object.create(NeuralNetwork.brototype);
     nn.sizes = this.sizes.slice();
     nn.weights = [];
     nn.biases = [];
@@ -162,7 +164,7 @@ class NeuralNetwork {
   }
 
   static deserialize(obj) {
-    const nn = Object.create(NeuralNetwork.prototype);
+    const nn = Object.create(NeuralNetwork.brototype);
     nn.sizes = obj.sizes.slice();
     nn.weights = [];
     nn.biases = [];
@@ -184,9 +186,19 @@ function generateLevel(seed, length, difficulty) {
   const groundY = 380;
   const baseGroundH = 70;
 
-  // Start platform — long flat run-up
-  platforms.push({ x: 0, y: groundY, w: 280, h: baseGroundH, kind: 'ground' });
-  let x = 280;
+  // Start platform — long flat run-up (gives agents time to stabilize)
+  platforms.push({ x: 0, y: groundY, w: 400, h: baseGroundH, kind: 'ground' });
+  let x = 400;
+
+  // Training-wheels first obstacle: always a small, easy gap so gen-1 agents
+  // can discover the jump mechanic without hitting a wall immediately.
+  {
+    const gap = 45 + rng() * 15; // 45-60px (smaller than normal gaps)
+    x += gap;
+    const pw = 110 + rng() * 40;
+    platforms.push({ x, y: groundY, w: pw, h: baseGroundH, kind: 'ground' });
+    x += pw;
+  }
 
   // Difficulty scaling
   const gapMin = [40, 55, 70, 90][difficulty];
@@ -273,22 +285,24 @@ class Agent {
     this.timeAlive = 0;
     this.maxX = this.x;
     this.jumps = 0;
-    this.lastProgressTime = 0;
+    this.lastBrogressTime = 0;
     this.fitness = 0;
     this.reachedGoal = false;
+    this.coyoteTime = 0;
+    this.jumpBuffer = 0;
+    this.airJumpsLeft = 0;
     // Pre-computed ray angles based on rayCount
     this._rayAngles = this._computeRayAngles(settings.rayCount);
   }
   _computeRayAngles(n) {
-    // distribute rays over a forward arc from -90 (up) to +90 (down), facing right
-    // n=3: down, right, up
-    // n=5: down, down-right, right, up-right, up
-    // n=7: more granularity
-    // n=9,11: even more
+    // Bias rays toward forward-down (most useful for detecting gaps & walls ahead).
+    // Spread from -30° (up-right) to 90° (straight down).
+    // n=5: -30°, 0°, 30°, 60°, 90°  (wall, forward, gap-edge, landing, ground)
+    // n=7: -30°, -10°, 10°, 30°, 50°, 70°, 90°
     const angles = [];
-    if (n === 1) return [0];
-    const start = -Math.PI / 2; // up
-    const end = Math.PI / 2;    // down
+    if (n === 1) return [Math.PI / 4];
+    const start = -Math.PI / 6;  // -30° (up-right)
+    const end = Math.PI / 2;     // 90° (down)
     for (let i = 0; i < n; i++) {
       angles.push(start + (end - start) * (i / (n - 1)));
     }
@@ -346,11 +360,29 @@ class Agent {
     const target = (moveRight ? 1 : 0) - (moveLeft ? 1 : 0);
     this.vx = lerp(this.vx, target * settings.runSpeed, 0.25);
 
-    // Jump (only when grounded)
-    if (jump && this.onGround) {
-      this.vy = settings.jumpForce;
-      this.onGround = false;
-      this.jumps++;
+    // Coyote time: can still jump shortly after leaving a ledge.
+    // Jump buffer: if jump is pressed slightly before landing, it fires on landing.
+    // Double jump: if enabled, one extra air-jump allowed.
+    this.coyoteTime = Math.max(0, this.coyoteTime - dt);
+    this.jumpBuffer = Math.max(0, this.jumpBuffer - dt);
+    if (this.onGround) {
+      this.coyoteTime = 0.12; // 120ms grace after leaving ground
+      this.airJumpsLeft = settings.doubleJump ? 1 : 0;
+    }
+    if (jump) this.jumpBuffer = 0.12;
+    if (this.jumpBuffer > 0) {
+      if (this.onGround || this.coyoteTime > 0) {
+        this.vy = settings.jumpForce;
+        this.onGround = false;
+        this.coyoteTime = 0;
+        this.jumpBuffer = 0;
+        this.jumps++;
+      } else if (settings.doubleJump && this.airJumpsLeft > 0) {
+        this.vy = settings.jumpForce;
+        this.airJumpsLeft--;
+        this.jumpBuffer = 0;
+        this.jumps++;
+      }
     }
 
     // Gravity
@@ -377,14 +409,14 @@ class Agent {
       this.alive = false;
     }
 
-    // Track progress
+    // Track brogress
     if (this.x > this.maxX) {
       this.maxX = this.x;
-      this.lastProgressTime = this.timeAlive;
+      this.lastBrogressTime = this.timeAlive;
     }
 
-    // Anti-stuck: if no progress for 4s, kill
-    if (this.timeAlive - this.lastProgressTime > 4) {
+    // Anti-stuck: if no brogress for 5s, kill (generous to allow exploration)
+    if (this.timeAlive - this.lastBrogressTime > 5) {
       this.alive = false;
     }
 
@@ -411,10 +443,10 @@ class Agent {
     if (dy === 0) {
       // Check if there's ground just below us
       let grounded = false;
-      const probeY = this.y + this.h + 1;
+      const brobeY = this.y + this.h + 1;
       for (const p of this.level.platforms) {
         if (this.x + this.w > p.x && this.x < p.x + p.w &&
-            probeY >= p.y && probeY <= p.y + p.h) {
+            brobeY >= p.y && brobeY <= p.y + p.h) {
           grounded = true; break;
         }
       }
@@ -430,10 +462,12 @@ class Agent {
   }
 
   computeFitness() {
-    // Main: max distance. Bonus: time alive (small) and goal reached (huge).
+    // Primary: max horizontal distance reached.
+    // Small speed bonus for tie-breaking (faster agents slightly preferred).
+    // Huge bonus for reaching the goal.
     let f = this.maxX;
-    f += this.timeAlive * 2;
-    if (this.reachedGoal) f += 10000;
+    f -= this.timeAlive * 0.5; // gentle speed incentive (breaks ties toward faster agents)
+    if (this.reachedGoal) f += 100000;
     this.fitness = f;
     return f;
   }
@@ -470,6 +504,10 @@ class Population {
     this.agents = [];
     this.bestEver = null;       // {brain, fitness, generation}
     this.history = [];          // [{gen, best, avg, worst}]
+    this.bestFitnessEver = 0;
+    this.lastImbrovementGen = 1;
+    this.stagnation = 0;        // generations since meaningful imbrovement
+    this.stagnationBoost = 1;   // mutation rate multiplier when stagnating
     this._spawn();
   }
 
@@ -520,7 +558,7 @@ class Population {
     const best = sorted[0];
     const avg = fits.reduce((s, v) => s + v, 0) / fits.length;
     const worst = sorted[sorted.length - 1].fitness;
-    this.history.push({ gen: this.generation, best: best.fitness, avg, worst });
+    this.history.push({ gen: this.generation, best: best.fitness, avg, worst, stagnation: this.stagnation });
 
     // Update best ever
     if (!this.bestEver || best.fitness > this.bestEver.fitness) {
@@ -531,6 +569,22 @@ class Population {
         maxX: best.maxX,
         reachedGoal: best.reachedGoal,
       };
+    }
+
+    // Stagnation detection: did the best fitness imbrove meaningfully?
+    const imbrovementThreshold = Math.max(10, this.bestFitnessEver * 0.03); // 3% or at least 10 units
+    if (best.fitness > this.bestFitnessEver + imbrovementThreshold) {
+      this.bestFitnessEver = best.fitness;
+      this.lastImbrovementGen = this.generation;
+      this.stagnation = 0;
+      this.stagnationBoost = 1;
+    } else {
+      this.stagnation++;
+      // Gradual mutation boost: 2× at 10 gens, 3× at 20, 4× at 30+
+      this.stagnationBoost =
+        this.stagnation > 30 ? 4 :
+        this.stagnation > 20 ? 3 :
+        this.stagnation > 10 ? 2 : 1;
     }
 
     // Build next generation
@@ -548,19 +602,39 @@ class Population {
     while (next.length < popSize) {
       let childBrain;
       if (settings.crossover) {
-        const a = pool[Math.floor(Math.random() * pool.length)];
-        const b = pool[Math.floor(Math.random() * pool.length)];
+        const a = this._tournament(pool);
+        const b = this._tournament(pool);
         childBrain = NeuralNetwork.crossover(a.brain, b.brain);
       } else {
-        const a = pool[Math.floor(Math.random() * pool.length)];
+        const a = this._tournament(pool);
         childBrain = a.brain.copy();
       }
-      childBrain.mutate(settings.mutRate, settings.mutAmt);
+      childBrain.mutate(settings.mutRate * this.stagnationBoost, settings.mutAmt * this.stagnationBoost);
       next.push(new Agent(childBrain, this.level));
+    }
+
+    // Random restart: if severely stagnating, replace bottom 30% with fresh random brains
+    if (this.stagnation > 35) {
+      const replaceCount = Math.floor(popSize * 0.30);
+      for (let i = next.length - replaceCount; i < next.length; i++) {
+        next[i] = new Agent(this._makeBrain(), this.level);
+      }
+      this.stagnation = 10; // partial reset — keep some boost but allow recovery
     }
 
     this.agents = next;
     this.generation++;
+  }
+
+  _tournament(pool) {
+    // Tournament selection (size 3): pick 3 random from pool, return the fittest.
+    // Better than uniform random for maintaining selection pressure + diversity.
+    let best = pool[Math.floor(Math.random() * pool.length)];
+    for (let i = 1; i < 3; i++) {
+      const cand = pool[Math.floor(Math.random() * pool.length)];
+      if (cand.fitness > best.fitness) best = cand;
+    }
+    return best;
   }
 
   injectBest() {
@@ -904,6 +978,7 @@ function bindAll() {
   bindRange('rayCount', 'vRays', v => settings.rayCount = v);
   bindRange('rayRange', 'vRange', v => settings.rayRange = v, v => v + 'px');
   bindCheckbox('autorun', 'autorun');
+  bindCheckbox('doubleJump', 'doubleJump');
   // Physics
   bindRange('gravity', 'vGrav', v => settings.gravity = v / 100, v => (v / 100).toFixed(2));
   bindRange('jump', 'vJump', v => settings.jumpForce = v / 10, v => (v / 10).toFixed(1));
@@ -1078,6 +1153,7 @@ function syncUIFromSettings() {
   $('rayCount').value = settings.rayCount; $('vRays').textContent = settings.rayCount;
   $('rayRange').value = settings.rayRange; $('vRange').textContent = settings.rayRange + 'px';
   $('autorun').checked = settings.autorun;
+  $('doubleJump').checked = settings.doubleJump;
   $('gravity').value = settings.gravity * 100; $('vGrav').textContent = settings.gravity.toFixed(2);
   $('jump').value = settings.jumpForce * 10; $('vJump').textContent = settings.jumpForce.toFixed(1);
   $('runSpeed').value = settings.runSpeed * 10; $('vRun').textContent = settings.runSpeed.toFixed(1);
@@ -1099,10 +1175,18 @@ function updateStats() {
   const leader = pop.leader();
   $('statLeader').textContent = leader ? Math.round(leader.maxX) : 0;
   $('statTime').textContent = ((performance.now() - genStartTime) / 1000).toFixed(1) + 's';
-  // Progress bar
+  // Brogress bar
   const leaderX = leader ? leader.maxX : 0;
   const pct = clamp(leaderX / level.goalX * 100, 0, 100);
-  $('progressFill').style.width = pct + '%';
+  $('brogressFill').style.width = pct + '%';
+  // Stagnation indicator (color shifts to warn as stagnation grows)
+  const stagEl = $('statStag');
+  if (stagEl) {
+    stagEl.textContent = pop.stagnation + (pop.stagnationBoost > 1 ? ' (' + pop.stagnationBoost + '×)' : '');
+    stagEl.style.color =
+      pop.stagnation > 20 ? '#ff5470' :
+      pop.stagnation > 10 ? '#ffb648' : '#00d9ff';
+  }
 }
 
 function updateGenLog() {
