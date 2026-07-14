@@ -48,13 +48,15 @@ const settings = {
   gravity: 0.60,
   jumpForce: -12.0,
   runSpeed: 3.5,
-  timeout: 20,
   // Level
   seed: 42,
   levelLen: 6000,
   difficulty: 1,
   // Mechanics
   doubleJump: false,
+  // Timeout
+  timeMultiplier: 2.5,  // multiplier on the optimal crossing time
+  effectiveTimeout: 30, // computed dynamically, shown in UI
   // Viz
   showRays: true,
   showAll: true,
@@ -233,7 +235,9 @@ function generateLevel(seed, length, difficulty) {
     } else if (r < 0.78 && difficulty >= 1) {
       // Spikes on ground — must jump over
       const sw = 25 + rng() * 35;
-      spikes.push({ x: x + 20, y: groundY - 14, w: sw, h: 14 });
+      // Spikes are 20px tall — taller than the agent's clearance, so they
+      // can't be cleared by a casual jump. (Was 14px, which agents could skip over.)
+      spikes.push({ x: x + 20, y: groundY - 20, w: sw, h: 20 });
       const pw = 60 + rng() * 60;
       platforms.push({ x, y: groundY, w: pw, h: baseGroundH, kind: 'ground' });
       x += pw;
@@ -286,6 +290,9 @@ class Agent {
     this.maxX = this.x;
     this.jumps = 0;
     this.lastProgressTime = 0;
+    this.lastCheckpointX = this.x;   // for progress-rate killer
+    this.lastCheckpointTime = 0;    // time of last significant progress (≥20px)
+    this.recentPositions = [];      // [{t, x}] — sliding window for velocity check
     this.fitness = 0;
     this.reachedGoal = false;
     this.coyoteTime = 0;
@@ -415,13 +422,48 @@ class Agent {
       this.lastProgressTime = this.timeAlive;
     }
 
-    // Anti-stuck: if no progress for 5s, kill (generous to allow exploration)
-    if (this.timeAlive - this.lastProgressTime > 5) {
+    // Sliding-window position tracker (for velocity check).
+    // Keep only positions from the last 2 seconds.
+    this.recentPositions.push({ t: this.timeAlive, x: this.x });
+    while (this.recentPositions.length > 0 && this.recentPositions[0].t < this.timeAlive - 2) {
+      this.recentPositions.shift();
+    }
+
+    // Progress-rate killer: require at least 20px of new maxX progress every 2s.
+    // This is the primary anti-stuck mechanism. An agent moving slower than
+    // 10 px/s forward on average will be killed. (Was 15px/3s = 5 px/s, which
+    // let slow crawlers survive indefinitely and drag generations on forever.)
+    if (this.maxX - this.lastCheckpointX >= 20) {
+      this.lastCheckpointX = this.maxX;
+      this.lastCheckpointTime = this.timeAlive;
+    }
+    if (this.timeAlive - this.lastCheckpointTime > 2) {
       this.alive = false;
     }
 
-    // Timeout
-    if (this.timeAlive > settings.timeout) {
+    // Velocity killer: compute net forward displacement over the last 2s.
+    // If the agent moved less than 15px NET in 2s, kill them. This catches
+    // oscillating agents (run right, run left, run right...) whose maxX slowly
+    // creeps forward but who are clearly stuck against a wall or obstacle.
+    if (this.recentPositions.length > 5) {
+      const oldest = this.recentPositions[0];
+      const windowDt = this.timeAlive - oldest.t;
+      if (windowDt > 1.5) {  // only check once we have enough history
+        const netDx = this.x - oldest.x;
+        if (netDx < 15) {
+          this.alive = false;
+        }
+      }
+    }
+
+    // Anti-stuck: hard kill if literally no maxX progress for 4s (safety net)
+    if (this.timeAlive - this.lastProgressTime > 4) {
+      this.alive = false;
+    }
+
+    // Dynamic timeout: based on level length & run speed, with leniency multiplier.
+    // This ensures short levels end fast and long levels get enough time.
+    if (this.timeAlive > settings.effectiveTimeout) {
       this.alive = false;
     }
   }
@@ -482,14 +524,22 @@ function attachLevelHelpers(level) {
     return false;
   };
   level.isSpikeAt = function(x, y) {
+    // Padded for same reason as rectHitsSpike
+    const pad = 3;
     for (const s of this.spikes) {
-      if (x >= s.x && x < s.x + s.w && y >= s.y && y < s.y + s.h) return true;
+      if (x >= s.x - pad && x < s.x + s.w + pad && y >= s.y - pad && y < s.y + s.h + pad) return true;
     }
     return false;
   };
   level.rectHitsSpike = function(x, y, w, h) {
+    // Padded hitbox: 3px forgiveness on each side so that visual "touching"
+    // always counts as a hit. Without this, an agent landing exactly on top
+    // of a spike (agent bottom == spike top) would survive due to strict
+    // inequality in the AABB check.
+    const pad = 3;
     for (const s of this.spikes) {
-      if (x < s.x + s.w && x + w > s.x && y < s.y + s.h && y + h > s.y) return true;
+      if (x < s.x + s.w + pad && x + w > s.x - pad &&
+          y < s.y + s.h + pad && y + h > s.y - pad) return true;
     }
     return false;
   };
@@ -982,15 +1032,15 @@ function bindAll() {
   // Physics
   bindRange('gravity', 'vGrav', v => settings.gravity = v / 100, v => (v / 100).toFixed(2));
   bindRange('jump', 'vJump', v => settings.jumpForce = v / 10, v => (v / 10).toFixed(1));
-  bindRange('runSpeed', 'vRun', v => settings.runSpeed = v / 10, v => (v / 10).toFixed(1));
-  bindRange('timeout', 'vTimeout', v => settings.timeout = v, v => v + 's');
+  bindRange('runSpeed', 'vRun', v => { settings.runSpeed = v / 10; refreshTimeout(); }, v => (v / 10).toFixed(1));
+  bindRange('timeMult', 'vTimeout', v => { settings.timeMultiplier = v / 10; refreshTimeout(); }, v => '×' + (v / 10).toFixed(1));
   // Level
   $('seed').addEventListener('change', e => {
     const s = parseInt(e.target.value, 10);
     if (isNaN(s)) { e.target.value = settings.seed; return; }
     settings.seed = s;
   });
-  bindRange('levelLen', 'vLen', v => settings.levelLen = v, v => v + 'px');
+  bindRange('levelLen', 'vLen', v => { settings.levelLen = v; refreshTimeout(); }, v => v + 'px');
   bindRange('difficulty', 'vDiff', v => settings.difficulty = v, v => ['Easy','Medium','Hard','Brutal'][v]);
   $('btnNewLevel').addEventListener('click', () => {
     settings.seed = Math.floor(Math.random() * 100000);
@@ -1052,13 +1102,33 @@ function bindAll() {
   });
 }
 
+/* Compute a realistic per-generation timeout based on level length & run speed.
+   optimalTime = how long an agent running at full speed in a straight line takes.
+   effectiveTimeout = optimalTime × multiplier, clamped to a sane range. */
+function computeEffectiveTimeout() {
+  const pixelsPerSec = settings.runSpeed * 60; // runSpeed is per-frame at 60fps
+  const optimalTime = settings.levelLen / Math.max(1, pixelsPerSec);
+  const t = optimalTime * settings.timeMultiplier;
+  // Clamp: at least 10s (so agents get a fair shot on tiny levels),
+  //        at most 180s (hard safety cap so a gen can NEVER drag forever).
+  return clamp(t, 10, 180);
+}
+
+function refreshTimeout() {
+  settings.effectiveTimeout = computeEffectiveTimeout();
+  const elEff = $('vEffTimeout');
+  if (elEff) elEff.textContent = settings.effectiveTimeout.toFixed(0) + 's';
+}
+
 function regenerateLevel() {
   level = attachLevelHelpers(generateLevel(settings.seed, settings.levelLen, settings.difficulty));
+  refreshTimeout();
   pop = new Population(level);
   genStartTime = performance.now();
 }
 
 function fullReset() {
+  refreshTimeout();
   pop = new Population(level);
   genStartTime = performance.now();
 }
@@ -1157,7 +1227,8 @@ function syncUIFromSettings() {
   $('gravity').value = settings.gravity * 100; $('vGrav').textContent = settings.gravity.toFixed(2);
   $('jump').value = settings.jumpForce * 10; $('vJump').textContent = settings.jumpForce.toFixed(1);
   $('runSpeed').value = settings.runSpeed * 10; $('vRun').textContent = settings.runSpeed.toFixed(1);
-  $('timeout').value = settings.timeout; $('vTimeout').textContent = settings.timeout + 's';
+  $('timeMult').value = settings.timeMultiplier * 10; $('vTimeout').textContent = '×' + settings.timeMultiplier.toFixed(1);
+  $('vEffTimeout').textContent = settings.effectiveTimeout.toFixed(0) + 's';
   $('seed').value = settings.seed;
   $('levelLen').value = settings.levelLen; $('vLen').textContent = settings.levelLen + 'px';
   $('difficulty').value = settings.difficulty; $('vDiff').textContent = ['Easy','Medium','Hard','Brutal'][settings.difficulty];
@@ -1312,6 +1383,7 @@ function render() {
 /* ---------- Init ---------- */
 function init() {
   bindAll();
+  refreshTimeout();
   syncUIFromSettings();
   resizeCanvas();
   // Initial camera position
