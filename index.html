@@ -157,8 +157,11 @@
             <input type="range" id="runSpeed" min="10" max="100" value="35" step="1">
           </div>
           <div class="field">
-            <label>Max step time per gen <span class="val" id="vTimeout">20s</span></label>
-            <input type="range" id="timeout" min="5" max="120" value="20" step="1">
+            <label>Time leniency multiplier <span class="val" id="vTimeout">×2.5</span></label>
+            <input type="range" id="timeMult" min="10" max="60" value="25" step="1">
+          </div>
+          <div class="field">
+            <label class="hint">Effective per-gen timeout: <span class="val" id="vEffTimeout">30s</span></label>
           </div>
           <div class="field checkbox">
             <input type="checkbox" id="doubleJump">
